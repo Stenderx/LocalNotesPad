@@ -64,6 +64,9 @@ final class NotesViewModel {
     /// Pending debounced save. Cancelled and replaced on every edit.
     @ObservationIgnored private var saveTask: Task<Void, Never>?
 
+    /// Most recent unsaved drawing and document staged for debounced save.
+    @ObservationIgnored private var pendingSave: (drawing: PKDrawing, note: NoteDocument)?
+
     /// Creates a view model bound to the shared document manager.
     convenience init() {
         self.init(manager: DocumentManager.shared)
@@ -131,6 +134,11 @@ final class NotesViewModel {
     /// Deletes `note` from disk and from the list, updating the selection if needed.
     /// - Parameter note: Note to remove.
     func delete(_ note: NoteDocument) {
+        if pendingSave?.note.id == note.id {
+            saveTask?.cancel()
+            saveTask = nil
+            pendingSave = nil
+        }
         do {
             try manager.delete(note)
             notes.removeAll { $0.id == note.id }
@@ -180,36 +188,43 @@ final class NotesViewModel {
     ///   - drawing: Current drawing to persist.
     ///   - note: Note the drawing belongs to.
     func scheduleSave(drawing: PKDrawing, for note: NoteDocument) {
+        pendingSave = (drawing, note)
         saveTask?.cancel()
         saveTask = Task {
             try? await Task.sleep(for: .seconds(0.8))
             guard !Task.isCancelled else { return }
-            saveStatus = .saving
-            do {
-                let updated = try manager.save(drawing: drawing, for: note)
-                if let index = notes.firstIndex(where: { $0.id == note.id }) {
-                    notes[index] = updated
-                }
-                saveStatus = .saved(Date())
-            } catch {
-                saveStatus = .failed(error.localizedDescription)
-            }
+            performSave(drawing: drawing, for: note)
         }
     }
 
-    /// Cancels the pending debounce and saves immediately when a drawing is supplied.
+    /// Flushes any pending autosave immediately.
+    ///
+    /// If an explicit drawing and note are provided, those are persisted.
+    /// Otherwise, any drawing previously scheduled for debounced save is written to disk.
     /// - Parameters:
-    ///   - drawing: Drawing to persist immediately, or `nil` to only cancel.
-    ///   - note: Note the drawing belongs to, or `nil` to only cancel.
-    func flushPendingSave(drawing: PKDrawing?, for note: NoteDocument?) {
+    ///   - drawing: Drawing to persist immediately, or `nil` to flush the scheduled save.
+    ///   - note: Note the drawing belongs to, or `nil` to flush the scheduled save.
+    func flushPendingSave(drawing: PKDrawing? = nil, for note: NoteDocument? = nil) {
         saveTask?.cancel()
         saveTask = nil
-        guard let drawing, let note else { return }
+
+        let targetDrawing = drawing ?? pendingSave?.drawing
+        let targetNote = note ?? pendingSave?.note
+        guard let targetDrawing, let targetNote else { return }
+
+        performSave(drawing: targetDrawing, for: targetNote)
+    }
+
+    /// Performs the synchronous disk write and updates view model state.
+    private func performSave(drawing: PKDrawing, for note: NoteDocument) {
         saveStatus = .saving
         do {
             let updated = try manager.save(drawing: drawing, for: note)
             if let index = notes.firstIndex(where: { $0.id == note.id }) {
                 notes[index] = updated
+            }
+            if pendingSave?.note.id == note.id {
+                pendingSave = nil
             }
             saveStatus = .saved(Date())
         } catch {
@@ -234,9 +249,9 @@ final class NotesViewModel {
         errorMessage = nil
     }
 
-    /// Cancels any in-flight debounce (called when the window disappears).
+    /// Flushes any in-flight debounce to disk (called when the window disappears).
     func cancelPendingWork() {
-        saveTask?.cancel()
+        flushPendingSave()
     }
 }
 

@@ -37,6 +37,9 @@ final class PencilHoldTracker: UIGestureRecognizer {
     /// Location of the initial touch down, in view coordinates.
     private var touchDownLocation: CGPoint = .zero
 
+    /// Reference point from which drift is measured during a hold candidate window.
+    private var holdAnchorLocation: CGPoint = .zero
+
     /// Most recent sample that moved more than one point, in view coordinates.
     private var lastSampleLocation: CGPoint = .zero
 
@@ -87,20 +90,21 @@ final class PencilHoldTracker: UIGestureRecognizer {
         let location = touch.location(in: view)
         touchDownLocation = location
         lastSampleLocation = location
+        holdAnchorLocation = location
         hasFired = false
         lastMovementTime = CACurrentMediaTime()
         startPolling()
         onTouchBegan?()
     }
 
-    /// Refreshes the movement timestamp whenever the pencil drifts more than one point.
+    /// Resets the hold window whenever the pencil drifts beyond `maximumMovement`.
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first(where: { $0.type == .pencil }) ?? touches.first else { return }
         let location = touch.location(in: view)
-        let dx = location.x - lastSampleLocation.x
-        let dy = location.y - lastSampleLocation.y
-        if hypot(dx, dy) > 1.0 {
-            lastSampleLocation = location
+        lastSampleLocation = location
+        let drift = hypot(location.x - holdAnchorLocation.x, location.y - holdAnchorLocation.y)
+        if drift > maximumMovement {
+            holdAnchorLocation = location
             lastMovementTime = CACurrentMediaTime()
         }
     }
@@ -124,6 +128,7 @@ final class PencilHoldTracker: UIGestureRecognizer {
         super.reset()
         stopPolling()
         hasFired = false
+        holdAnchorLocation = .zero
     }
 
     /// Restarts the polling timer on the main run loop in the common modes.
@@ -144,13 +149,16 @@ final class PencilHoldTracker: UIGestureRecognizer {
         pollTimer = nil
     }
 
-    /// Fires `onHoldDetected` once the pencil has been still long enough and has moved far
-    /// enough to count as a stroke rather than a tap.
+    /// Fires `onHoldDetected` once the pencil has been still long enough, remained within
+    /// `maximumMovement` of the hold anchor, and moved far enough from touch down to count
+    /// as a stroke rather than a tap.
     private func evaluateHold() {
         guard !hasFired else { return }
         guard CACurrentMediaTime() - lastMovementTime >= holdDuration else { return }
         guard hypot(lastSampleLocation.x - touchDownLocation.x,
                     lastSampleLocation.y - touchDownLocation.y) >= minimumStrokeLength else { return }
+        guard hypot(lastSampleLocation.x - holdAnchorLocation.x,
+                    lastSampleLocation.y - holdAnchorLocation.y) <= maximumMovement else { return }
         hasFired = true
         stopPolling()
         onHoldDetected?(lastSampleLocation)

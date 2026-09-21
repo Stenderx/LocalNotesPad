@@ -27,7 +27,11 @@ struct ShareSheet: UIViewControllerRepresentable {
     /// - Returns: A configured activity view controller ready to present.
     func makeUIViewController(context: Context) -> UIActivityViewController {
         let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
-        controller.popoverPresentationController?.permittedArrowDirections = []
+        if let popover = controller.popoverPresentationController {
+            popover.permittedArrowDirections = []
+            popover.sourceView = controller.view
+            popover.sourceRect = CGRect(x: controller.view.bounds.midX, y: controller.view.bounds.midY, width: 0, height: 0)
+        }
         return controller
     }
 

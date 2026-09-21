@@ -24,6 +24,7 @@ struct CanvasViewRepresentable: UIViewRepresentable {
         let view = InfiniteCanvasView(frame: .zero)
         view.delegate = context.coordinator
         view.drawing = drawing
+        context.coordinator.lastKnownDrawing = drawing
         context.coordinator.lastKnownDrawingData = drawing.dataRepresentation()
         context.coordinator.onDrawingChanged = onDrawingChanged
         context.coordinator.lastTool = activeTool
@@ -32,7 +33,8 @@ struct CanvasViewRepresentable: UIViewRepresentable {
             guard let coordinator, let view else { return }
             coordinator.notify(drawing: view.drawing)
         }
-        view.resetCanvasContentSize()
+        view.resetCanvasContentSize(for: drawing)
+        view.resetViewport()
         return view
     }
 
@@ -45,12 +47,19 @@ struct CanvasViewRepresentable: UIViewRepresentable {
             context.coordinator.lastTool = activeTool
         }
 
-        let incoming = drawing.dataRepresentation()
-        if incoming != context.coordinator.lastKnownDrawingData {
-            context.coordinator.isPropagatingFromCanvas = true
-            uiView.drawing = drawing
-            context.coordinator.lastKnownDrawingData = incoming
-            context.coordinator.isPropagatingFromCanvas = false
+        let lastDrawing = context.coordinator.lastKnownDrawing
+        let strokesChanged = lastDrawing?.strokes.count != drawing.strokes.count
+        let boundsChanged = lastDrawing?.bounds != drawing.bounds
+        if strokesChanged || boundsChanged {
+            let incoming = drawing.dataRepresentation()
+            if incoming != context.coordinator.lastKnownDrawingData {
+                context.coordinator.isPropagatingFromCanvas = true
+                uiView.drawing = drawing
+                uiView.resetCanvasContentSize(for: drawing)
+                context.coordinator.lastKnownDrawing = drawing
+                context.coordinator.lastKnownDrawingData = incoming
+                context.coordinator.isPropagatingFromCanvas = false
+            }
         }
     }
 
@@ -68,6 +77,8 @@ struct CanvasViewRepresentable: UIViewRepresentable {
     /// Delegate bridge that also suppresses the echo of our own programmatic updates.
     @MainActor
     final class Coordinator: NSObject, PKCanvasViewDelegate {
+        /// Cached instance of the drawing to detect stroke/bounds mutations without constant re-serialization.
+        var lastKnownDrawing: PKDrawing?
         /// Serialized form of the drawing the bridge last observed or pushed, used to detect real external changes.
         var lastKnownDrawingData: Data?
         /// The last tool applied to the canvas, so redundant tool reassignments are skipped.
@@ -94,6 +105,7 @@ struct CanvasViewRepresentable: UIViewRepresentable {
         /// in `lastKnownDrawingData` and the value is handed to the owner through
         /// `onDrawingChanged`, keeping the binding a strictly one-way programmatic input.
         func notify(drawing: PKDrawing) {
+            lastKnownDrawing = drawing
             lastKnownDrawingData = drawing.dataRepresentation()
             onDrawingChanged?(drawing)
         }

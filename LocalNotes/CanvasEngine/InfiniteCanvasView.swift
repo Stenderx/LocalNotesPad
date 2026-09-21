@@ -132,10 +132,22 @@ final class InfiniteCanvasView: PKCanvasView {
         }
         zoomObservation = observe(\.zoomScale, options: [.new]) { [weak self] _, _ in
             MainActor.assumeIsolated {
+                self?.updateGridPattern()
                 self?.updateGridFrame()
                 self?.extendCanvasIfNeeded()
             }
         }
+    }
+
+    /// Re-resolves the grid tile pattern for the current zoom scale and display traits so
+    /// squared-paper tiles zoom together with the ink while staying sharp.
+    func updateGridPattern() {
+        let currentScale = zoomScale > 0 ? zoomScale : 1.0
+        let effectiveSpacing = gridSpacing * currentScale
+        gridView.backgroundColor = CanvasGridPattern.makeGridColor(
+            spacing: effectiveSpacing,
+            traitCollection: traitCollection
+        )
     }
 
     /// Refreshes the grid colour when the traits that affect the rendered tile change.
@@ -150,10 +162,7 @@ final class InfiniteCanvasView: PKCanvasView {
             UITraitActiveAppearance.self,
             UITraitDisplayScale.self,
         ]) { (view: InfiniteCanvasView, _: UITraitCollection) in
-            view.gridView.backgroundColor = CanvasGridPattern.makeGridColor(
-                spacing: view.gridSpacing,
-                traitCollection: view.traitCollection
-            )
+            view.updateGridPattern()
         }
     }
 
@@ -174,10 +183,22 @@ final class InfiniteCanvasView: PKCanvasView {
         isExtending = false
     }
 
-    /// Restores the content size to the current viewport, at least 2000 points tall.
-    func resetCanvasContentSize() {
+    /// Restores the content size to the current viewport or drawing bounds, at least 2000 points tall.
+    func resetCanvasContentSize(for drawing: PKDrawing? = nil) {
         guard bounds.width > 0 else { return }
-        contentSize = CGSize(width: bounds.width, height: max(bounds.height, 2000))
+        let minHeight = max(bounds.height, 2000)
+        let drawingBottom = drawing?.bounds.maxY ?? 0
+        let targetHeight = max(minHeight, drawingBottom + extensionThreshold)
+        contentSize = CGSize(width: bounds.width, height: targetHeight)
+        updateGridPattern()
+        updateGridFrame()
+    }
+
+    /// Resets the viewport offset and zoom scale back to default origin (0, 0) and 1.0x zoom.
+    func resetViewport() {
+        setContentOffset(.zero, animated: false)
+        setZoomScale(1.0, animated: false)
+        updateGridPattern()
         updateGridFrame()
     }
 

@@ -61,9 +61,15 @@ enum PDFExporter {
               contentBounds.width > 0,
               contentBounds.height > 0 else {
             context.beginPage()
+            let cg = context.cgContext
+            cg.saveGState()
+            cg.setFillColor(UIColor.white.cgColor)
+            cg.fill(CGRect(origin: .zero, size: pageSize))
+            cg.restoreGState()
+
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: UIFont.systemFont(ofSize: 12),
-                .foregroundColor: UIColor.secondaryLabel
+                .foregroundColor: UIColor.gray
             ]
             NSAttributedString(string: "This note is empty.", attributes: attributes)
                 .draw(at: CGPoint(x: margin, y: margin))
@@ -78,6 +84,11 @@ enum PDFExporter {
         for pageIndex in 0..<pageCount {
             context.beginPage()
             let cg = context.cgContext
+            cg.saveGState()
+            cg.setFillColor(UIColor.white.cgColor)
+            cg.fill(CGRect(origin: .zero, size: pageSize))
+            cg.restoreGState()
+
             cg.saveGState()
             cg.clip(to: CGRect(
                 x: margin,
@@ -119,7 +130,31 @@ enum PDFExporter {
         path.lineWidth = max(averageSampleWidth(of: stroke), 1)
         path.lineCapStyle = .round
         path.lineJoinStyle = .round
-        return (path, stroke.ink.color)
+        let strokeColor = resolveExportColor(for: stroke.ink.color)
+        return (path, strokeColor)
+    }
+
+    /// Adapts ink color for printable PDF paper (white background).
+    /// If ink was drawn in Dark Mode (e.g. white or near-white), it maps to black
+    /// so it remains visible on paper. Non-white colors (blue, red, green, etc.)
+    /// are preserved.
+    private static func resolveExportColor(for color: UIColor) -> UIColor {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        if color.getRed(&r, green: &g, blue: &b, alpha: &a) {
+            let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+            if luminance > 0.85 {
+                return UIColor.black.withAlphaComponent(max(a, 0.85))
+            }
+            return color
+        }
+        var white: CGFloat = 0
+        if color.getWhite(&white, alpha: &a) {
+            if white > 0.85 {
+                return UIColor.black.withAlphaComponent(max(a, 0.85))
+            }
+            return color
+        }
+        return color
     }
 
     /// Mean `PKStrokePoint.size.width` across the stroke's samples.
@@ -153,12 +188,12 @@ enum PDFExporter {
             width: contentWidth,
             height: 0.5
         )
-        context.cgContext.setFillColor(UIColor.secondaryLabel.withAlphaComponent(0.25).cgColor)
+        context.cgContext.setFillColor(UIColor.gray.withAlphaComponent(0.3).cgColor)
         context.cgContext.fill(ruleRect)
 
         let attributes: [NSAttributedString.Key: Any] = [
             .font: UIFont.systemFont(ofSize: 9),
-            .foregroundColor: UIColor.secondaryLabel
+            .foregroundColor: UIColor.gray
         ]
         let caption = "\(title) · page \(pageIndex + 1)/\(pageCount)"
         NSAttributedString(string: caption, attributes: attributes)

@@ -204,7 +204,7 @@ build_with_toolchain() {
     swift_files=($swift_files_raw)
 
     info "Path B: compiling ${#swift_files[@]} Swift file(s) for arm64-apple-ios$MIN_IOS …"
-    "$SWIFTC" -sdk "$SDK" -target "arm64-apple-ios$MIN_IOS" -swift-version 5 -parse-as-library \
+    "$SWIFTC" -sdk "$SDK" -target "arm64-apple-ios$MIN_IOS" -swift-version 6 -parse-as-library \
         -O -module-name "$APP_NAME" \
         "${swift_files[@]}" \
         -o "$APP_BUNDLE/$APP_NAME"

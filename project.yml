@@ -66,15 +66,33 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
 
+  LocalNotesTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: LocalNotesTests
+    dependencies:
+      - target: LocalNotes
+    settings:
+      base:
+        PRODUCT_NAME: LocalNotesTests
+        PRODUCT_BUNDLE_IDENTIFIER: com.stefano.localnotes.tests
+        TARGETED_DEVICE_FAMILY: "2"
+        CODE_SIGNING_ALLOWED: NO
+
 schemes:
   LocalNotes:
     build:
       targets:
         LocalNotes: all
+        LocalNotesTests: [test]
     run:
       config: Debug
     test:
       config: Debug
+      targets:
+        - LocalNotesTests
     profile:
       config: Release
     analyze:

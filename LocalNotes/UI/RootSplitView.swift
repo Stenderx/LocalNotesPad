@@ -25,6 +25,7 @@ struct RootSplitView: View {
         } detail: {
             if let note = viewModel.selectedNote {
                 NoteDetailView(viewModel: viewModel, note: note)
+                    .id(note.id)
             } else {
                 ContentUnavailableView(
                     "No Note Selected",

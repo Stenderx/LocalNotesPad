@@ -26,11 +26,12 @@ enum CanvasGridPattern {
     /// it is a plain pattern colour, not a dynamic one, so the caller resolves
     /// (and re-resolves on trait changes) with the current trait collection.
     static func makeGridColor(spacing: CGFloat, traitCollection: UITraitCollection) -> UIColor {
-        let key = cacheKey(spacing: spacing, traitCollection: traitCollection)
+        let roundedSpacing = max(round(spacing * 2.0) / 2.0, 4.0)
+        let key = cacheKey(spacing: roundedSpacing, traitCollection: traitCollection)
         if let color = cachedValue(forKey: key, in: colorCache) {
             return color
         }
-        let image = makeTileImage(spacing: spacing, traitCollection: traitCollection)
+        let image = makeTileImage(spacing: roundedSpacing, traitCollection: traitCollection)
         let color = UIColor(patternImage: image)
         store(color, forKey: key, in: &colorCache)
         return color
@@ -101,8 +102,11 @@ enum CanvasGridPattern {
         cache[key]
     }
 
-    /// Stores `value` under `key` in `cache`.
+    /// Stores `value` under `key` in `cache`, bounding capacity to prevent memory bloat during zooming.
     private static func store<T>(_ value: T, forKey key: String, in cache: inout [String: T]) {
+        if cache.count > 64 {
+            cache.removeAll(keepingCapacity: true)
+        }
         cache[key] = value
     }
 }
