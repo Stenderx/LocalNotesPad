@@ -19,6 +19,15 @@ final class InfiniteCanvasView: PKCanvasView {
     /// Number of points added to the content height each time the canvas grows.
     var extensionAmount: CGFloat = 3000
 
+    /// Delay of user inactivity before trimming excess empty canvas space at the bottom (seconds).
+    var idleTrimDelay: TimeInterval = 3.5
+
+    /// Minimum excess height (in points) above the needed content required to trigger a trim.
+    var excessTrimThreshold: CGFloat = 1500
+
+    /// Timer scheduled to evaluate and trim excess bottom space when the canvas is idle.
+    private var idleTrimTimer: Timer?
+
     /// Called whenever the drawing was rewritten by a snap operation.
     var onDrawingMutatedBySnap: (() -> Void)?
 
@@ -111,6 +120,7 @@ final class InfiniteCanvasView: PKCanvasView {
         }
         holdTracker.onTouchEnded = { [weak self] in
             self?.finalizePendingSnap()
+            self?.scheduleIdleTrim()
         }
     }
 
@@ -132,6 +142,7 @@ final class InfiniteCanvasView: PKCanvasView {
         offsetObservation = observe(\.contentOffset, options: [.new]) { [weak self] _, _ in
             MainActor.assumeIsolated {
                 self?.extendCanvasIfNeeded()
+                self?.scheduleIdleTrim()
             }
         }
         zoomObservation = observe(\.zoomScale, options: [.new]) { [weak self] _, _ in
@@ -254,10 +265,60 @@ final class InfiniteCanvasView: PKCanvasView {
 
         pendingSnap = nil
         onDrawingMutatedBySnap?()
+        scheduleIdleTrim()
+    }
+
+    /// Schedules an idle evaluation to trim large unused empty space at the bottom of the canvas.
+    func scheduleIdleTrim() {
+        idleTrimTimer?.invalidate()
+        let timer = Timer(timeInterval: idleTrimDelay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.trimExcessCanvasIfNeeded()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        idleTrimTimer = timer
+    }
+
+    /// Trims excess empty space at the bottom of the canvas if the user has left a large unused tail.
+    ///
+    /// The trimmed height always preserves:
+    /// 1. All drawn ink strokes (`drawing.bounds.maxY`).
+    /// 2. The entire currently visible viewport (`contentOffset.y + bounds.height`).
+    /// 3. A generous breathing room buffer of `extensionThreshold` (1200 pt).
+    ///
+    /// If the user subsequently scrolls down towards the bottom, `extendCanvasIfNeeded()` automatically
+    /// generates more canvas as usual.
+    func trimExcessCanvasIfNeeded() {
+        // Do not trim while the user is actively touching, dragging or scrolling with momentum
+        guard !isTracking, !isDragging, !isDecelerating, !isExtending else {
+            scheduleIdleTrim()
+            return
+        }
+        guard bounds.height > 0 else { return }
+
+        let highestRequiredY = max(drawing.bounds.maxY, contentOffset.y + bounds.height)
+        let minHeight = max(bounds.height, 2000)
+        let buffer: CGFloat = extensionThreshold
+        let targetHeight = max(minHeight, highestRequiredY + buffer)
+
+        // Only trim if there is significant excess space beyond the target
+        guard contentSize.height > targetHeight + excessTrimThreshold else { return }
+
+        contentSize.height = targetHeight
+        updateGridFrame()
     }
 
     /// Sizes the grid view so it covers the whole scrollable content.
     private func updateGridFrame() {
         gridView.frame = CGRect(origin: .zero, size: contentSize)
+    }
+
+    override func willMove(toWindow newWindow: UIWindow?) {
+        super.willMove(toWindow: newWindow)
+        if newWindow == nil {
+            idleTrimTimer?.invalidate()
+            idleTrimTimer = nil
+        }
     }
 }

@@ -93,6 +93,7 @@ struct CanvasViewRepresentable: UIViewRepresentable {
             guard !isPropagatingFromCanvas else { return }
             if let canvas = canvasView as? InfiniteCanvasView {
                 canvas.reapplyPendingSnapIfNeeded()
+                canvas.scheduleIdleTrim()
             }
             notify(drawing: canvasView.drawing)
         }
