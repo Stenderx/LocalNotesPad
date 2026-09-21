@@ -71,7 +71,11 @@ final class InfiniteCanvasView: PKCanvasView {
     ///   viewport-anchored background would stay glued to the screen instead of scrolling
     ///   with the ink. `gridView` lives in the canvas' content space and follows the ink.
     private func configureCanvas() {
+        #if targetEnvironment(simulator)
+        drawingPolicy = .anyInput
+        #else
         drawingPolicy = .pencilOnly
+        #endif
         alwaysBounceVertical = true
         alwaysBounceHorizontal = false
         showsHorizontalScrollIndicator = false
