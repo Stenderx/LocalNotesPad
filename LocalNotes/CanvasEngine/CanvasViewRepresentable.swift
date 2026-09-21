@@ -24,8 +24,8 @@ struct CanvasViewRepresentable: UIViewRepresentable {
         let view = InfiniteCanvasView(frame: .zero)
         view.delegate = context.coordinator
         view.drawing = drawing
-        context.coordinator.lastKnownDrawing = drawing
-        context.coordinator.lastKnownDrawingData = drawing.dataRepresentation()
+        let initialData = drawing.dataRepresentation()
+        context.coordinator.lastExternalDrawingData = initialData
         context.coordinator.onDrawingChanged = onDrawingChanged
         context.coordinator.lastTool = activeTool
         apply(tool: activeTool, to: view)
@@ -47,19 +47,15 @@ struct CanvasViewRepresentable: UIViewRepresentable {
             context.coordinator.lastTool = activeTool
         }
 
-        let lastDrawing = context.coordinator.lastKnownDrawing
-        let strokesChanged = lastDrawing?.strokes.count != drawing.strokes.count
-        let boundsChanged = lastDrawing?.bounds != drawing.bounds
-        if strokesChanged || boundsChanged {
-            let incoming = drawing.dataRepresentation()
-            if incoming != context.coordinator.lastKnownDrawingData {
-                context.coordinator.isPropagatingFromCanvas = true
-                uiView.drawing = drawing
-                uiView.resetCanvasContentSize(for: drawing)
-                context.coordinator.lastKnownDrawing = drawing
-                context.coordinator.lastKnownDrawingData = incoming
-                context.coordinator.isPropagatingFromCanvas = false
-            }
+        // Only update the canvas drawing if external SwiftUI state actually changed (e.g. loading a different note).
+        // NEVER overwrite the canvas drawing while the user is actively drawing strokes!
+        let incomingData = drawing.dataRepresentation()
+        if incomingData != context.coordinator.lastExternalDrawingData {
+            context.coordinator.lastExternalDrawingData = incomingData
+            context.coordinator.isPropagatingFromCanvas = true
+            uiView.drawing = drawing
+            uiView.resetCanvasContentSize(for: drawing)
+            context.coordinator.isPropagatingFromCanvas = false
         }
     }
 
@@ -68,19 +64,30 @@ struct CanvasViewRepresentable: UIViewRepresentable {
     private func apply(tool: ActiveTool, to view: PKCanvasView) {
         switch tool {
         case .pen:
+            #if targetEnvironment(simulator)
+            view.drawingPolicy = .anyInput
+            #else
+            view.drawingPolicy = .default
+            #endif
             view.tool = PKInkingTool(.pen, color: UIColor.label, width: 2.5)
         case .eraser:
+            #if targetEnvironment(simulator)
+            view.drawingPolicy = .anyInput
+            #else
+            view.drawingPolicy = .default
+            #endif
             view.tool = PKEraserTool(.vector)
+        case .pan:
+            // In pan mode, touch inputs pan/scroll the scroll view instead of drawing marks
+            view.drawingPolicy = .pencilOnly
         }
     }
 
     /// Delegate bridge that also suppresses the echo of our own programmatic updates.
     @MainActor
     final class Coordinator: NSObject, PKCanvasViewDelegate {
-        /// Cached instance of the drawing to detect stroke/bounds mutations without constant re-serialization.
-        var lastKnownDrawing: PKDrawing?
-        /// Serialized form of the drawing the bridge last observed or pushed, used to detect real external changes.
-        var lastKnownDrawingData: Data?
+        /// Serialized form of the drawing last observed or externally pushed.
+        var lastExternalDrawingData: Data?
         /// The last tool applied to the canvas, so redundant tool reassignments are skipped.
         var lastTool: ActiveTool?
         /// Set while `updateUIView` is writing to the canvas, so the resulting delegate callback is ignored.
@@ -99,15 +106,8 @@ struct CanvasViewRepresentable: UIViewRepresentable {
         }
 
         /// Publishes a drawing produced inside the canvas (user edit or snap mutation).
-        ///
-        /// The `drawing` binding is deliberately not written back from here: doing so would feed
-        /// SwiftUI state back into `updateUIView` on every stroke, replacing the live `PKDrawing`
-        /// mid-gesture and breaking in-progress input. Instead the serialized snapshot is recorded
-        /// in `lastKnownDrawingData` and the value is handed to the owner through
-        /// `onDrawingChanged`, keeping the binding a strictly one-way programmatic input.
         func notify(drawing: PKDrawing) {
-            lastKnownDrawing = drawing
-            lastKnownDrawingData = drawing.dataRepresentation()
+            lastExternalDrawingData = drawing.dataRepresentation()
             onDrawingChanged?(drawing)
         }
     }

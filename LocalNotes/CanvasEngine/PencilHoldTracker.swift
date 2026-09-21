@@ -89,6 +89,7 @@ final class PencilHoldTracker: UIGestureRecognizer {
 
     /// Starts a touch sequence: records the origin, arms the hold and begins polling.
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let event { super.touchesBegan(touches, with: event) }
         guard let touch = touches.first(where: { $0.type == .pencil }) ?? touches.first else { return }
         let location = touch.location(in: view)
         touchDownLocation = location
@@ -102,6 +103,7 @@ final class PencilHoldTracker: UIGestureRecognizer {
 
     /// Resets the hold window whenever the pencil drifts beyond `maximumMovement`.
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let event { super.touchesMoved(touches, with: event) }
         guard let touch = touches.first(where: { $0.type == .pencil }) ?? touches.first else { return }
         let location = touch.location(in: view)
         lastSampleLocation = location
@@ -114,15 +116,19 @@ final class PencilHoldTracker: UIGestureRecognizer {
 
     /// Ends the touch sequence, invalidating the timer and rearming the hold.
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let event { super.touchesEnded(touches, with: event) }
         stopPolling()
         hasFired = false
+        state = .failed
         onTouchEnded?()
     }
 
     /// Cancels the touch sequence, invalidating the timer and rearming the hold.
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let event { super.touchesCancelled(touches, with: event) }
         stopPolling()
         hasFired = false
+        state = .cancelled
         onTouchEnded?()
     }
 

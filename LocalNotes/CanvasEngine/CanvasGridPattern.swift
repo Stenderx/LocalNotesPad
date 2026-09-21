@@ -64,8 +64,13 @@ enum CanvasGridPattern {
             context.setFillColor(background.cgColor)
             context.fill(bounds)
 
-            let lineWidth = 1.0 / scale
-            let lineColor = UIColor.label.withAlphaComponent(0.12).resolvedColor(with: traitCollection)
+            let lineWidth = max(1.0, 1.0 / scale)
+            let lineColor: UIColor
+            if traitCollection.userInterfaceStyle == .dark {
+                lineColor = UIColor(white: 0.28, alpha: 1.0)
+            } else {
+                lineColor = UIColor(white: 0.82, alpha: 1.0)
+            }
             context.setStrokeColor(lineColor.cgColor)
             context.setLineWidth(lineWidth)
 
