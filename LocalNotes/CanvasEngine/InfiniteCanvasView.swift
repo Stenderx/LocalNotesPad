@@ -13,17 +13,17 @@ final class InfiniteCanvasView: PKCanvasView {
     /// Spacing, in points, of the squared-paper grid drawn behind the ink.
     var gridSpacing: CGFloat = CanvasGridPattern.defaultSpacing
 
-    /// Distance from the bottom of the content, in points, at which the canvas grows again.
-    var extensionThreshold: CGFloat = 1200
+    /// Distance from the bottom of the content, in points, at which the canvas grows again during active scrolling.
+    var extensionThreshold: CGFloat = 600
 
     /// Number of points added to the content height each time the canvas grows.
-    var extensionAmount: CGFloat = 3000
+    var extensionAmount: CGFloat = 2000
 
     /// Delay of user inactivity before trimming excess empty canvas space at the bottom (seconds).
-    var idleTrimDelay: TimeInterval = 3.5
+    var idleTrimDelay: TimeInterval = 2.0
 
     /// Minimum excess height (in points) above the needed content required to trigger a trim.
-    var excessTrimThreshold: CGFloat = 1500
+    var excessTrimThreshold: CGFloat = 400
 
     /// Timer scheduled to evaluate and trim excess bottom space when the canvas is idle.
     private var idleTrimTimer: Timer?
@@ -45,6 +45,9 @@ final class InfiniteCanvasView: PKCanvasView {
 
     /// Re-entrancy guard for `extendCanvasIfNeeded()`.
     private var isExtending = false
+
+    /// Re-entrancy guard for `trimExcessCanvasIfNeeded()`.
+    private var isTrimming = false
 
     /// Re-entrancy guard for `reapplyPendingSnapIfNeeded()`.
     private var isReapplyingSnap = false
@@ -83,7 +86,7 @@ final class InfiniteCanvasView: PKCanvasView {
         #if targetEnvironment(simulator)
         drawingPolicy = .anyInput
         #else
-        drawingPolicy = .pencilOnly
+        drawingPolicy = .default
         #endif
         alwaysBounceVertical = true
         alwaysBounceHorizontal = false
@@ -124,10 +127,32 @@ final class InfiniteCanvasView: PKCanvasView {
         }
     }
 
-    /// Keeps the grid pinned to the content origin and grows the canvas when the visible
-    /// area approaches the bottom edge.
+    /// Keeps the grid pinned to the content origin, syncs width with the viewport,
+    /// and grows the canvas when actively scrolling near the bottom edge.
     override func layoutSubviews() {
         super.layoutSubviews()
+        guard bounds.width > 0, bounds.height > 0 else { return }
+
+        var geometryChanged = false
+
+        if contentSize.width != bounds.width {
+            contentSize.width = bounds.width
+            geometryChanged = true
+        }
+
+        let minHeight = max(bounds.height, 2000)
+        let drawingBottom = drawing.bounds.maxY
+        let requiredHeight = max(minHeight, drawingBottom + 800)
+        if contentSize.height < minHeight {
+            contentSize.height = requiredHeight
+            geometryChanged = true
+        }
+
+        if geometryChanged {
+            updateGridPattern()
+            updateGridFrame()
+        }
+
         sendSubviewToBack(gridView)
         updateGridFrame()
         extendCanvasIfNeeded()
@@ -181,16 +206,17 @@ final class InfiniteCanvasView: PKCanvasView {
         }
     }
 
-    /// Grows the content height by `extensionAmount` once the visible area gets within
-    /// `extensionThreshold` points of the bottom edge, or when the content is shorter than
-    /// the viewport. The width is never touched and the content never shrinks.
+    /// Grows the content height by `extensionAmount` when the user is actively scrolling towards the bottom edge,
+    /// or when the content is shorter than the viewport. The width is never touched and the content never shrinks.
     func extendCanvasIfNeeded() {
         guard bounds.height > 0 else { return }
-        guard !isExtending else { return }
+        guard !isExtending, !isTrimming else { return }
 
-        let isNearBottom = contentOffset.y + bounds.height > contentSize.height - extensionThreshold
         let isShorterThanViewport = contentSize.height < bounds.height
-        guard isNearBottom || isShorterThanViewport else { return }
+        let isActivelyScrolling = isTracking || isDragging || isDecelerating
+        let isNearBottom = contentOffset.y + bounds.height > contentSize.height - extensionThreshold
+
+        guard isShorterThanViewport || (isActivelyScrolling && isNearBottom) else { return }
 
         isExtending = true
         contentSize.height = max(contentSize.height, bounds.height) + extensionAmount
@@ -200,11 +226,11 @@ final class InfiniteCanvasView: PKCanvasView {
 
     /// Restores the content size to the current viewport or drawing bounds, at least 2000 points tall.
     func resetCanvasContentSize(for drawing: PKDrawing? = nil) {
-        guard bounds.width > 0 else { return }
-        let minHeight = max(bounds.height, 2000)
+        let width = bounds.width > 0 ? bounds.width : 0
+        let minHeight = bounds.height > 0 ? max(bounds.height, 2000) : 2000
         let drawingBottom = drawing?.bounds.maxY ?? 0
-        let targetHeight = max(minHeight, drawingBottom + extensionThreshold)
-        contentSize = CGSize(width: bounds.width, height: targetHeight)
+        let targetHeight = max(minHeight, drawingBottom + 800)
+        contentSize = CGSize(width: width, height: targetHeight)
         updateGridPattern()
         updateGridFrame()
     }
@@ -284,29 +310,49 @@ final class InfiniteCanvasView: PKCanvasView {
     ///
     /// The trimmed height always preserves:
     /// 1. All drawn ink strokes (`drawing.bounds.maxY`).
-    /// 2. The entire currently visible viewport (`contentOffset.y + bounds.height`).
-    /// 3. A generous breathing room buffer of `extensionThreshold` (1200 pt).
+    /// 2. The baseline note height (at least 2000 pt and viewport height).
+    /// 3. A comfortable breathing room buffer of 800 pt below the lowest ink stroke.
     ///
-    /// If the user subsequently scrolls down towards the bottom, `extendCanvasIfNeeded()` automatically
-    /// generates more canvas as usual.
+    /// If the viewport was left sitting in the empty tail, it is smoothly animated back to
+    /// the end of the content before trimming. Subsequent downward scrolling will seamlessly
+    /// extend the canvas again.
     func trimExcessCanvasIfNeeded() {
-        // Do not trim while the user is actively touching, dragging or scrolling with momentum
-        guard !isTracking, !isDragging, !isDecelerating, !isExtending else {
+        // Do not trim while the user is actively touching, dragging, decelerating, or during extension/trimming
+        guard !isTracking, !isDragging, !isDecelerating, !isExtending, !isTrimming else {
             scheduleIdleTrim()
             return
         }
         guard bounds.height > 0 else { return }
 
-        let highestRequiredY = max(drawing.bounds.maxY, contentOffset.y + bounds.height)
         let minHeight = max(bounds.height, 2000)
-        let buffer: CGFloat = extensionThreshold
-        let targetHeight = max(minHeight, highestRequiredY + buffer)
+        let drawingBottom = drawing.bounds.maxY
+        let buffer: CGFloat = 800
+        let neededHeight = max(minHeight, drawingBottom + buffer)
 
-        // Only trim if there is significant excess space beyond the target
-        guard contentSize.height > targetHeight + excessTrimThreshold else { return }
+        // Only trim if there is noticeable excess space beyond the needed content
+        guard contentSize.height > neededHeight + excessTrimThreshold else { return }
 
-        contentSize.height = targetHeight
-        updateGridFrame()
+        let maxOffsetY = max(0, neededHeight - bounds.height)
+
+        if contentOffset.y > maxOffsetY {
+            // Viewport is currently sitting down in the empty space that will be trimmed.
+            // Animate it smoothly back up to the end of the content, then trim contentSize.
+            isTrimming = true
+            UIView.animate(withDuration: 0.35, delay: 0, options: [.curveEaseInOut, .beginFromCurrentState]) {
+                self.contentOffset = CGPoint(x: self.contentOffset.x, y: maxOffsetY)
+            } completion: { [weak self] finished in
+                guard let self else { return }
+                self.isTrimming = false
+                if finished && !self.isTracking && !self.isDragging {
+                    self.contentSize.height = neededHeight
+                    self.updateGridFrame()
+                }
+            }
+        } else {
+            // Viewport is already above the trimmed region. Trim directly.
+            contentSize.height = neededHeight
+            updateGridFrame()
+        }
     }
 
     /// Sizes the grid view so it covers the whole scrollable content.

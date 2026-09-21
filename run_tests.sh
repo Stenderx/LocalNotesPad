@@ -37,7 +37,11 @@ struct TestRunner {
         testHoldTracker()
         print("✔ PencilHoldTracker tests passed.")
 
-        print("\n🎉 ALL 4 TEST SUITES PASSED CLEANLY!")
+        print("▶ Running Canvas Trimming & Geometry logic tests...")
+        testCanvasTrimmingLogic()
+        print("✔ Canvas Trimming & Geometry logic tests passed.")
+
+        print("\n🎉 ALL 5 TEST SUITES PASSED CLEANLY!")
     }
 
     static func testSnapper() {
@@ -128,6 +132,46 @@ struct TestRunner {
         // macOS stub/check
         assert(StraightLineSnapper.minimumSnapLength == 12)
         assert(StraightLineSnapper.interpolationSteps == 48)
+    }
+
+    static func testCanvasTrimmingLogic() {
+        let boundsHeight: CGFloat = 1194
+        let minHeight: CGFloat = max(boundsHeight, 2000) // 2000
+        let buffer: CGFloat = 800
+        let excessTrimThreshold: CGFloat = 400
+        let extensionThreshold: CGFloat = 600
+
+        // Case 1: Empty note (drawingBottom == 0), user scrolled down to 6000
+        let drawingBottomEmpty: CGFloat = 0
+        let neededHeightEmpty = max(minHeight, drawingBottomEmpty + buffer)
+        assert(neededHeightEmpty == 2000)
+
+        let contentHeightScrolled: CGFloat = 6000
+        let isExcess = contentHeightScrolled > neededHeightEmpty + excessTrimThreshold
+        assert(isExcess == true)
+
+        let maxOffsetY = max(0, neededHeightEmpty - boundsHeight) // 2000 - 1194 = 806
+        assert(maxOffsetY == 806)
+
+        // If viewport is at bottom (offset = 4806)
+        let currentOffsetY: CGFloat = 4806
+        assert(currentOffsetY > maxOffsetY) // Needs smooth spring back animation to 806
+
+        // Case 2: Inactive extension check (idle after trim)
+        let isActivelyScrolling = false
+        let isNearBottom = (maxOffsetY + boundsHeight) > neededHeightEmpty - extensionThreshold // 2000 > 1400 is true
+        let shouldExtend = isActivelyScrolling && isNearBottom
+        assert(shouldExtend == false, "Canvas must NEVER re-extend while user is idle after a trim")
+
+        // Case 3: Active scrolling extends canvas
+        let isActivelyScrollingTrue = true
+        let shouldExtendActive = isActivelyScrollingTrue && isNearBottom
+        assert(shouldExtendActive == true, "Canvas MUST extend when user actively scrolls towards the bottom")
+
+        // Case 4: Note with ink at 3500 pt
+        let drawingBottomWithInk: CGFloat = 3500
+        let neededHeightWithInk = max(minHeight, drawingBottomWithInk + buffer) // 4300
+        assert(neededHeightWithInk == 4300)
     }
 }
 

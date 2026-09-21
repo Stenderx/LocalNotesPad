@@ -66,18 +66,13 @@ final class PencilHoldTracker: UIGestureRecognizer {
         self.init(target: nil, action: nil)
     }
 
-    /// Restricts the recogniser to pencil touches on device, while allowing direct touches in the simulator.
+    /// Restricts the recogniser to pencil touches while also supporting direct touches, without interfering with PencilKit.
     private func configure() {
-        #if targetEnvironment(simulator)
         allowedTouchTypes = [
             NSNumber(value: UITouch.TouchType.pencil.rawValue),
             NSNumber(value: UITouch.TouchType.direct.rawValue)
         ]
         requiresExclusiveTouchType = false
-        #else
-        allowedTouchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
-        requiresExclusiveTouchType = true
-        #endif
         cancelsTouchesInView = false
         delaysTouchesBegan = false
     }
@@ -94,11 +89,7 @@ final class PencilHoldTracker: UIGestureRecognizer {
 
     /// Starts a touch sequence: records the origin, arms the hold and begins polling.
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        #if targetEnvironment(simulator)
-        guard let touch = touches.first else { return }
-        #else
         guard let touch = touches.first(where: { $0.type == .pencil }) ?? touches.first else { return }
-        #endif
         let location = touch.location(in: view)
         touchDownLocation = location
         lastSampleLocation = location
@@ -111,11 +102,7 @@ final class PencilHoldTracker: UIGestureRecognizer {
 
     /// Resets the hold window whenever the pencil drifts beyond `maximumMovement`.
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        #if targetEnvironment(simulator)
-        guard let touch = touches.first else { return }
-        #else
         guard let touch = touches.first(where: { $0.type == .pencil }) ?? touches.first else { return }
-        #endif
         let location = touch.location(in: view)
         lastSampleLocation = location
         let drift = hypot(location.x - holdAnchorLocation.x, location.y - holdAnchorLocation.y)
